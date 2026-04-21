@@ -76,12 +76,37 @@ pub fn SelectValue(props: SelectValueProps) -> Element {
         })
     });
 
-    let display_value = selected_text_value().unwrap_or_else(|| ctx.placeholder.cloned());
+    // Remember the last successfully resolved text so we don't flash the
+    // placeholder during transient states where `ctx.options` hasn't been
+    // (re-)populated yet (e.g. when the listbox mounts/unmounts during the
+    // open/close animation).
+    let mut last_resolved = use_signal(String::new);
+    use_effect(move || {
+        if let Some(text) = selected_text_value() {
+            last_resolved.set(text);
+        }
+    });
+
+    let has_value = ctx.value.read().is_some();
+    let display_value = match selected_text_value() {
+        Some(text) => text,
+        None if has_value => {
+            // Value is set but options haven't resolved yet — keep showing
+            // the last known text instead of falling back to the placeholder.
+            let last = last_resolved.read().clone();
+            if last.is_empty() {
+                ctx.placeholder.cloned()
+            } else {
+                last
+            }
+        }
+        None => ctx.placeholder.cloned(),
+    };
 
     rsx! {
         // Add placeholder option if needed
         span {
-            "data-placeholder": ctx.value.read().is_none(),
+            "data-placeholder": !has_value,
             ..props.attributes,
             {display_value}
         }
