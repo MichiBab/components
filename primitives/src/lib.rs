@@ -195,25 +195,26 @@ fn use_animated_open(
     id: impl Readable<Target = String> + Copy + 'static,
     open: impl Readable<Target = bool> + Copy + 'static,
 ) -> impl Fn() -> bool + Copy {
-    let animating = use_signal(|| false);
-
-    // Show in dom is a few frames behind the open signal to allow for the animation to start.
-    // If it does start, we wait for the animation to finish before showing removing the element from the DOM.
+    // Keep closing content mounted until its exit animation settles. A newer
+    // transition invalidates that completion, including close/open/close races.
     let mut show_in_dom = use_signal(|| false);
+    let mut transition = use_signal(|| 0u64);
 
     use_effect(move || {
-        let open = open.cloned();
-        if open {
-            show_in_dom.set(open);
-        } else {
+        let is_open = open.cloned();
+        let generation = transition.peek().wrapping_add(1);
+        transition.set(generation);
+        if is_open {
+            show_in_dom.set(true);
+        } else if *show_in_dom.peek() {
             spawn(async move {
                 let id = id.cloned();
                 let mut eval = dioxus::document::eval(
                     "const id = await dioxus.recv();
                     const element = document.getElementById(id);
                     if (element && element.getAnimations().length > 0) {
-                        // Removing or reopening the element cancels its animation.
-                        // Cancellation still completes closing; it is not an unhandled error.
+                        // Cancellation must settle without an unhandled rejection.
+                        // Rust checks whether this close is still current.
                         Promise.allSettled(element.getAnimations().map((animation) => animation.finished)).then(() => {
                             dioxus.send(true);
                         });
@@ -223,12 +224,14 @@ fn use_animated_open(
                 );
                 let _ = eval.send(id);
                 _ = eval.recv::<bool>().await;
-                show_in_dom.set(open);
+                if *transition.peek() == generation && !*open.peek() {
+                    show_in_dom.set(false);
+                }
             });
         }
     });
 
-    move || show_in_dom() || animating()
+    move || show_in_dom()
 }
 
 /// The side where the content will be displayed relative to the trigger
