@@ -171,6 +171,18 @@ pub fn SelectList(props: SelectListProps) -> Element {
 
     rsx! {
         if render() {
+            // A real hit target, not a pointer-transparent visual scrim. Keep
+            // it through closing so a touch cannot activate content underneath.
+            div {
+                class: "select-backdrop",
+                "aria-hidden": "true",
+                onpointerdown: move |event| { event.prevent_default(); event.stop_propagation(); },
+                onclick: move |event| {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    open.set(false);
+                },
+            }
             div {
                 id,
                 role: "listbox",
